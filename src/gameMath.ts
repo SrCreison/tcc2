@@ -1,33 +1,31 @@
 export class GameMath {
+    // Definimos os símbolos com seus pesos E valores de pagamento
     static commonSymbols = [
-        // LOW PAYS (Cristais Brutos - Alta Frequência)
-        { id: 1, name: 'cristal_cinza', weight: 500 },
-        { id: 2, name: 'cristal_verde', weight: 400 },
-        { id: 3, name: 'cristal_azul', weight: 350 },
-        { id: 4, name: 'cristal_rosa', weight: 300 },
-        { id: 5, name: 'cristal_amarelo', weight: 250 },
+        // LOW PAYS
+        { id: 1, name: 'cristal_cinza', weight: 500, pays: { '8-9': 0.25, '10-11': 0.75, '12+': 2 } },
+        { id: 2, name: 'cristal_verde', weight: 400, pays: { '8-9': 0.4, '10-11': 0.9, '12+': 4 } },
+        { id: 3, name: 'cristal_azul', weight: 350, pays: { '8-9': 0.5, '10-11': 1, '12+': 5 } },
+        { id: 4, name: 'cristal_rosa', weight: 300, pays: { '8-9': 0.8, '10-11': 1.2, '12+': 8 } },
+        { id: 5, name: 'cristal_amarelo', weight: 250, pays: { '8-9': 1, '10-11': 1.5, '12+': 10 } },
 
-        // HIGH PAYS (Poções Refinadas - Baixa Frequência)
-        { id: 6, name: 'pocao_verde', weight: 150 },
-        { id: 7, name: 'pocao_azul', weight: 100 },
-        { id: 8, name: 'pocao_vermelha', weight: 70 },
-        { id: 9, name: 'pocao_dourada', weight: 40 }, // O símbolo mais valioso do jogo base
+        // HIGH PAYS
+        { id: 6, name: 'pocao_verde', weight: 150, pays: { '8-9': 1.5, '10-11': 2, '12+': 12 } },
+        { id: 7, name: 'pocao_azul', weight: 100, pays: { '8-9': 2, '10-11': 5, '12+': 15 } },
+        { id: 8, name: 'pocao_vermelha', weight: 70, pays: { '8-9': 2.5, '10-11': 10, '12+': 25 } },
+        { id: 9, name: 'pocao_dourada', weight: 40, pays: { '8-9': 10, '10-11': 25, '12+': 50 } }, 
     ];
 
-    // 1. Tabela do Jogo Base
     static baseTable = [
         ...this.commonSymbols,
-        { id: 10, name: 'scatter_grimorio', weight: 25 } // Deixei mais difícil para balancear
+        { id: 10, name: 'scatter_grimorio', weight: 25 } 
     ];
 
-    // 2. Tabela do Jogo Bônus (Com o Multiplicador)
     static bonusTable = [
         ...this.commonSymbols,
         { id: 10, name: 'scatter_grimorio', weight: 20 },
-        { id: 11, name: 'pedra_filosofal', weight: 60 } // O multiplicador!
+        { id: 11, name: 'pedra_filosofal', weight: 60 } 
     ];
 
-    // Valores possíveis para o multiplicador da Pedra Filosofal
     static multiplierValues = [2, 3, 4, 5, 8, 10, 15, 25, 50, 100];
 
     static generateGridFromHash(hash: string, isBonusMode: boolean = false): any[] {
@@ -58,5 +56,22 @@ export class GameMath {
             }
         }
         return grid;
+    }
+
+    /**
+     * NOVO: Calcula o prêmio de um símbolo baseado na quantidade que caiu.
+     */
+    static calculatePayout(symbolName: string, count: number, betAmount: number): number {
+        // Encontra o símbolo na tabela base (poderia ser na bonusTable também, os pagamentos normais são os mesmos)
+        const symbol = this.baseTable.find(s => s.name === symbolName);
+        
+        if (!symbol || !symbol.pays) return 0;
+
+        let multiplier = 0;
+        if (count >= 8 && count <= 9) multiplier = symbol.pays['8-9'];
+        else if (count >= 10 && count <= 11) multiplier = symbol.pays['10-11'];
+        else if (count >= 12) multiplier = symbol.pays['12+'];
+
+        return betAmount * multiplier;
     }
 }
