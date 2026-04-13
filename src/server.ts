@@ -1,100 +1,85 @@
 import express from 'express';
 import cors from 'cors';
 import { ProvablyFair } from './provablyFair';
-import { GameMath } from './gameMath';
-import { GameEngine } from './gameEngine';
+import { RoundProcessor } from './roundProcessor'; // Usando o nosso novo Maestro
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 app.get('/api/test-crypto', (req, res) => {
-    const serverSeed = ProvablyFair.generateServerSeed();
-    const clientSeed = (req.query.cSeed as string) || "semente_padrao"; 
-    const nonce = parseInt(req.query.aposta as string) || 1;
-    const isBonusMode = req.query.bonus === 'true';
-    
+    // 1. Variáveis de Entrada do Jogador
+    const clientSeed = (req.query.cSeed as string) || "jogador_123"; 
+    const baseNonce = parseInt(req.query.aposta as string) || 1;
     const betAmount = 2.00; 
 
-    let cursor = 0; 
-    let isCascading = true;
-    let roundHistory = []; 
-    let totalWinAmount = 0; 
+    // O Cassino gera a semente (Num jogo real, ela seria buscada no banco de dados)
+    const serverSeed = ProvablyFair.generateServerSeed(); 
 
-    let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-    let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode);
-
-    while (isCascading) {
-        const avaliacao = GameEngine.evaluateGrid(currentGrid, betAmount);
-
-        roundHistory.push({
-            cascata: cursor,
-            hashUtilizado: currentHash,
-            grid: currentGrid,
-            resultado: avaliacao
-        });
-
-        if (avaliacao.teveVitoria) {
-            totalWinAmount += avaliacao.premioCascata; 
-            cursor++; 
-            currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-            let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode);
-            currentGrid = GameEngine.applyCascade(currentGrid, avaliacao.posicoesParaExplodir, poolDeNovosSimbolos);
-        } else {
-            isCascading = false; 
-        }
-    }
-
-    // --- FIM DA CASCATA: ANÁLISE FINAL DA TELA ---
+    // --- EXECUÇÃO DO JOGO BASE ---
+    const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, baseNonce, betAmount, false);
     
-    let totalMultiplier = 0;
-    let totalScatters = 0;
+    // Verifica se ativou o Bônus
+    const ativouBônus = jogoBase.scattersNaTela >= 4;
+    
+    let totalHashesUtilizados = jogoBase.hashesGerados;
+    let premioFinalTotal = jogoBase.premioRodada;
+    let dadosDoBonus = null;
 
-    // Varre a tela final (onde as peças pararam de cair)
-    currentGrid.forEach(symbol => {
-        if (!symbol) return;
+    // --- MÁGICA: EXECUÇÃO DO BÔNUS (TRANSAÇÃO ATÔMICA) ---
+    if (ativouBônus) {
+        dadosDoBonus = {
+            quantidadeGiros: 10,
+            premioTotalBonus: 0,
+            giros: [] as any[] // Array para tipar no typescript
+        };
 
-        // Conta as Pedras Filosofais (Só funciona se isBonusMode for true)
-        if (isBonusMode && symbol.name === 'pedra_filosofal') {
-            totalMultiplier += symbol.valor_multiplicador;
+        // Roda os 10 giros grátis instantaneamente no servidor!
+        for (let i = 1; i <= 10; i++) {
+            // O Nonce aumenta a cada giro grátis para garantir hashes únicos!
+            const bonusNonce = baseNonce + i; 
+            
+            const giroBonus = RoundProcessor.processSingleSpin(serverSeed, clientSeed, bonusNonce, betAmount, true);
+
+            dadosDoBonus.giros.push({
+                giro: i,
+                nonceUtilizado: bonusNonce,
+                scattersNaTela: giroBonus.scattersNaTela,
+                multiplicadorFinal: giroBonus.multiplicadorAplicado,
+                premio: giroBonus.premioRodada,
+                historico: giroBonus.historico
+            });
+
+            dadosDoBonus.premioTotalBonus += giroBonus.premioRodada;
+            totalHashesUtilizados += giroBonus.hashesGerados;
         }
 
-        // Conta os Scatters na tela
-        if (symbol.name === 'scatter_grimorio') {
-            totalScatters++;
-        }
-    });
-
-    // Aplica o multiplicador se houver ganho no modo bônus
-    if (totalWinAmount > 0 && totalMultiplier > 0) {
-        totalWinAmount = totalWinAmount * totalMultiplier;
+        // Soma o prêmio do jogo base com o que ganhou no bônus
+        premioFinalTotal += dadosDoBonus.premioTotalBonus;
     }
 
-    // NOVO: Verifica se ativou o bônus! (4 ou mais Scatters)
-    // Se o jogador JÁ ESTIVER no bônus, 3 scatters costumam dar "+5 Giros" (Retrigger). 
-    // Vamos focar no acionamento inicial por enquanto.
-    const ativouGirosGratis = !isBonusMode && totalScatters >= 4;
-
+    // --- ENTREGA O "ROTEIRO DO FILME" PARA O FRONTEND ---
     res.json({
-        mensagem: `Rodada concluída!`,
+        mensagem: ativouBônus ? "BÔNUS ATIVADO! 10 Giros Grátis Calculados." : "Rodada Base concluída.",
         auditoria: {
             serverSeed,
             clientSeed,
-            nonce,
-            modoBonusAtivo: isBonusMode,
-            totalHashesGerados: cursor + 1
-        },
-        // NOVO BLOCO PARA O FRONTEND
-        recursosEspeciais: {
-            scattersNaTela: totalScatters,
-            ativouGirosGratis: ativouGirosGratis
+            nonceInicial: baseNonce,
+            totalHashesGerados: totalHashesUtilizados
         },
         resumoFinanceiro: {
             aposta: betAmount,
-            multiplicadorFinal: totalMultiplier > 0 ? `${totalMultiplier}x` : 'Nenhum',
-            premioTotal: totalWinAmount
+            premioTotalDaSessao: premioFinalTotal
         },
-        historicoRodada: roundHistory 
+        roteiroDoJogo: {
+            jogoBase: {
+                scattersEncontrados: jogoBase.scattersNaTela,
+                ativouGirosGratis: ativouBônus,
+                premioRodada: jogoBase.premioRodada,
+                historicoRodada: jogoBase.historico
+            },
+            jogoBonus: dadosDoBonus
+        }
     });
 });
 
