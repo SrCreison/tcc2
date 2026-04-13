@@ -13,21 +13,22 @@ app.get('/api/test-crypto', (req, res) => {
     const clientSeed = (req.query.cSeed as string) || "semente_padrao"; 
     const nonce = parseInt(req.query.aposta as string) || 1;
     const isBonusMode = req.query.bonus === 'true';
+    
+    // NOVO: Valor da aposta em R$ (vamos assumir R$ 2.00 para este teste)
+    const betAmount = 2.00; 
 
-    let cursor = 0; // Começamos na cascata 0
+    let cursor = 0; 
     let isCascading = true;
-    let roundHistory = []; // O "filme" da rodada inteira
+    let roundHistory = []; 
+    let totalWinAmount = 0; // Rastreia o prêmio total da rodada
 
-    // 1. Gera o Grid Inicial
     let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
     let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode);
 
-    // 2. O Loop da Cascata (Roda em milissegundos no servidor)
     while (isCascading) {
-        // O juiz avalia a tela atual
-        const avaliacao = GameEngine.evaluateGrid(currentGrid);
+        // Agora passamos o valor da aposta para a Engine!
+        const avaliacao = GameEngine.evaluateGrid(currentGrid, betAmount);
 
-        // Guardamos essa "cena" no histórico para o Frontend exibir
         roundHistory.push({
             cascata: cursor,
             hashUtilizado: currentHash,
@@ -36,25 +37,38 @@ app.get('/api/test-crypto', (req, res) => {
         });
 
         if (avaliacao.teveVitoria) {
-            // Se ganhou, precisamos de novos símbolos!
+            // Soma o prêmio da cascata ao total do jogador
+            totalWinAmount += avaliacao.premioCascata; 
+
             cursor++; 
-            
-            // Geramos um NOVO hash usando o novo cursor
             currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-            
-            // Geramos um pool de 30 novos símbolos para usar como "estepe"
             let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode);
-            
-            // A gravidade atua: remove os velhos e injeta os novos
             currentGrid = GameEngine.applyCascade(currentGrid, avaliacao.posicoesParaExplodir, poolDeNovosSimbolos);
         } else {
-            // Se não formou 8 iguais, a rodada acabou!
             isCascading = false; 
         }
     }
 
+    // A CASCATA ACABOU. HORA DE APLICAR OS MULTIPLICADORES!
+    let totalMultiplier = 0;
+    
+    // Se o jogador ganhou algum prêmio (não adianta multiplicar zero)...
+    if (totalWinAmount > 0 && isBonusMode) {
+        // Varre o último grid gerado (onde a cascata parou) para achar as Pedras Filosofais
+        currentGrid.forEach(symbol => {
+            if (symbol && symbol.name === 'pedra_filosofal') {
+                totalMultiplier += symbol.valor_multiplicador;
+            }
+        });
+
+        // Se encontrou alguma pedra, multiplica o prêmio!
+        if (totalMultiplier > 0) {
+            totalWinAmount = totalWinAmount * totalMultiplier;
+        }
+    }
+
     res.json({
-        mensagem: `Rodada concluída com ${cursor} cascatas!`,
+        mensagem: `Rodada concluída!`,
         auditoria: {
             serverSeed,
             clientSeed,
@@ -62,7 +76,12 @@ app.get('/api/test-crypto', (req, res) => {
             modoBonusAtivo: isBonusMode,
             totalHashesGerados: cursor + 1
         },
-        historicoRodada: roundHistory // O Frontend vai ler isso passo a passo!
+        resumoFinanceiro: {
+            aposta: betAmount,
+            multiplicadorFinal: totalMultiplier > 0 ? `${totalMultiplier}x` : 'Nenhum',
+            premioTotal: totalWinAmount
+        },
+        historicoRodada: roundHistory 
     });
 });
 
