@@ -1,11 +1,22 @@
 import express from 'express';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
 import { ProvablyFair } from './provablyFair';
 import { RoundProcessor } from './roundProcessor';
 
 const app = express();
-const prisma = new PrismaClient();
+
+/**
+ * CONFIGURAÇÃO PRISMA 7 + POSTGRESQL
+ * Para a versão 7, o Prisma exige que a conexão seja feita via adaptador
+ * quando a URL não está diretamente no schema.prisma.
+ */
+const connectionString = `${process.env.DATABASE_URL}`;
+const pool = new pg.Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 // 1. Configuração do Middleware CORS
 app.use(cors({
@@ -44,6 +55,9 @@ app.get('/api/play', async (req, res) => {
                 
                 dadosDoBonus.giros.push({
                     giro: i,
+                    nonceUtilizado: bonusNonce,
+                    scattersNaTela: giroBonus.scattersNaTela,
+                    multiplicadorFinal: giroBonus.multiplicadorAplicado,
                     premio: giroBonus.premioRodada,
                     grid: giroBonus.historico[0].grid // Pegamos o grid final do giro
                 });
@@ -52,7 +66,7 @@ app.get('/api/play', async (req, res) => {
             premioFinalTotal = Number((premioFinalTotal + dadosDoBonus.premioTotalBonus).toFixed(2));
         }
 
-        // SALVANDO NO BANCO (Prisma)
+        // SALVANDO NO BANCO (Prisma 7)
         const savedRound = await prisma.gameRound.create({
             data: {
                 serverSeed,
@@ -93,19 +107,28 @@ app.get('/api/play', async (req, res) => {
 
 // ROTA 2: HISTÓRICO (Para a barra lateral do front)
 app.get('/api/history', async (req, res) => {
-    const history = await prisma.gameRound.findMany({
-        take: 10,
-        orderBy: { createdAt: 'desc' }
-    });
-    res.json(history);
+    try {
+        const history = await prisma.gameRound.findMany({
+            take: 10,
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json(history);
+    } catch (error) {
+        console.error("Erro ao buscar histórico:", error);
+        res.status(500).json({ erro: "Erro ao carregar histórico." });
+    }
 });
 
 // ROTA 3: CALCULADORA PROVABLY FAIR (Auditoria)
 app.post('/api/verify', async (req, res) => {
-    const { serverSeed, clientSeed, nonceInicial, isBonusBuy } = req.body;
-    const betAmount = 2.00; 
-    const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, nonceInicial, betAmount, false, isBonusBuy);
-    res.json({ verificado: true, jogoBase });
+    try {
+        const { serverSeed, clientSeed, nonceInicial, isBonusBuy } = req.body;
+        const betAmount = 2.00; 
+        const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, nonceInicial, betAmount, false, isBonusBuy);
+        res.json({ verificado: true, jogoBase });
+    } catch (error) {
+        res.status(400).json({ erro: "Erro na verificação dos dados." });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
