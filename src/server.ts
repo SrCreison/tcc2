@@ -4,8 +4,10 @@ import { ProvablyFair } from './provablyFair';
 import { RoundProcessor } from './roundProcessor';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const cors = require('cors');
+app.use(cors({
+  origin: 'https://play.abraaodaldon.com.br'
+}));
 
 // ROTA 1: JOGO PRINCIPAL
 app.get('/api/play', (req, res) => {
