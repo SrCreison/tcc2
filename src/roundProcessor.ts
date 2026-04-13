@@ -3,20 +3,18 @@ import { GameMath } from './gameMath';
 import { GameEngine } from './gameEngine';
 
 export class RoundProcessor {
-    /**
-     * Executa UMA ÚNICA RODADA de cascata completa.
-     * Retorna o histórico dessa rodada, o prêmio, e os recursos ativados.
-     */
-    static processSingleSpin(serverSeed: string, clientSeed: string, nonce: number, betAmount: number, isBonusMode: boolean) {
+    
+    // NOVO: Adicionado isBonusBuyTrigger
+    static processSingleSpin(serverSeed: string, clientSeed: string, nonce: number, betAmount: number, isBonusMode: boolean, isBonusBuyTrigger: boolean = false) {
         let cursor = 0;
         let isCascading = true;
         let roundHistory = [];
         let winAmount = 0;
 
         let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-        let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode);
+        // Repassamos a flag isBonusBuyTrigger apenas para o primeiro giro base
+        let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode, isBonusBuyTrigger);
 
-        // O Loop da Cascata
         while (isCascading) {
             const avaliacao = GameEngine.evaluateGrid(currentGrid, betAmount);
 
@@ -31,14 +29,14 @@ export class RoundProcessor {
                 winAmount += avaliacao.premioCascata;
                 cursor++;
                 currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-                let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode);
+                // Cascatas de preenchimento NUNCA são compras de bônus, são sempre normais
+                let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode, false);
                 currentGrid = GameEngine.applyCascade(currentGrid, avaliacao.posicoesParaExplodir, poolDeNovosSimbolos);
             } else {
                 isCascading = false;
             }
         }
 
-        // Análise Final do Grid (Scatters e Multiplicadores)
         let totalMultiplier = 0;
         let totalScatters = 0;
 
@@ -52,8 +50,11 @@ export class RoundProcessor {
             }
         });
 
+        // FIX: Limpeza de casas decimais!
         if (winAmount > 0 && totalMultiplier > 0) {
-            winAmount = winAmount * totalMultiplier;
+            winAmount = Number((winAmount * totalMultiplier).toFixed(2));
+        } else {
+            winAmount = Number(winAmount.toFixed(2));
         }
 
         return {
