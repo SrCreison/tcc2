@@ -1,14 +1,13 @@
+datasource db {
+  provider = "postgresql"
+}
+
 generator client {
   provider = "prisma-client-js"
 }
 
-datasource db {
-  provider = "mongodb" // Ou "postgresql" se preferir
-  url      = env("DATABASE_URL")
-}
-
 model GameRound {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  id                String   @id @default(uuid())
   serverSeed        String
   clientSeed        String
   nonce             Int
@@ -16,7 +15,6 @@ model GameRound {
   payout            Float
   isBonusBuy        Boolean
   totalScatters     Int
-  // Salvamos o histórico completo (cascatas) como JSON
   history           Json     
   createdAt         DateTime @default(now())
 }
