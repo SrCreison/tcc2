@@ -2,43 +2,46 @@ import express from 'express';
 import cors from 'cors';
 import { ProvablyFair } from './provablyFair';
 import { GameMath } from './gameMath';
+import { GameEngine } from './gameEngine';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Nossa rota principal
 app.get('/api/test-crypto', (req, res) => {
-    // 1. Servidor gera sua semente aleatória (CSPRNG)
     const serverSeed = ProvablyFair.generateServerSeed();
-    
-    // 2. Captura a Client Seed enviada pela URL (?cSeed=). Se não vier, usa um padrão.
     const clientSeed = (req.query.cSeed as string) || "semente_padrao"; 
-    
-    // 3. Captura o Nonce (número da aposta) pela URL (?aposta=).
     const nonce = parseInt(req.query.aposta as string) || 1;
+    const isBonusMode = req.query.bonus === 'true';
 
-    // 4. Junta tudo para criar o destino da rodada
+    // 1. Gera o Hash
     const gameHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce);
 
-    // 5. MÁGICA: Transforma o Hash no Grid 6x5 usando a tabela de probabilidades
-    const gridGerado = GameMath.generateGridFromHash(gameHash);
+    // 2. Gera os primeiros 30 símbolos
+    const gridGerado = GameMath.generateGridFromHash(gameHash, isBonusMode);
 
-    // 6. Devolve o resultado formatado para a tela
+    // 3. Avaliação do grid com os resultados gerados
+    const avaliacao = GameEngine.evaluateGrid(gridGerado);
+
     res.json({
-        mensagem: "Grid Gerado com Sucesso!",
+        mensagem: isBonusMode ? "Grid BÔNUS Gerado!" : "Grid BASE Gerado!",
         auditoria: {
-            serverSeed: serverSeed,
-            clientSeed: clientSeed,
-            nonce: nonce,
-            hashFinal: gameHash
+            serverSeed,
+            clientSeed,
+            nonce,
+            hashFinal: gameHash,
+            modoBonusAtivo: isBonusMode
         },
-        scattersEncontrados: gridGerado.filter(s => s.name === 'scatter_grimorio').length,
+        estatisticas: {
+            scatters: gridGerado.filter(s => s.name === 'scatter_grimorio').length,
+            multiplicadores: gridGerado.filter(s => s.name === 'pedra_filosofal').length,
+        },
+        // Mostramos o resultado da avaliação aqui:
+        resultadoRodada: avaliacao,
         grid: gridGerado
     });
 });
 
-// Usando a porta dinâmica para não dar erro na nuvem
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
