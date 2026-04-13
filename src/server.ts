@@ -1,45 +1,47 @@
 import express from 'express';
 import cors from 'cors';
 import { ProvablyFair } from './provablyFair';
-import { RoundProcessor } from './roundProcessor'; // Usando o nosso novo Maestro
+import { RoundProcessor } from './roundProcessor';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get('/api/test-crypto', (req, res) => {
-    // 1. Variáveis de Entrada do Jogador
+// ROTA 1: JOGO PRINCIPAL
+app.get('/api/play', (req, res) => {
     const clientSeed = (req.query.cSeed as string) || "jogador_123"; 
     const baseNonce = parseInt(req.query.aposta as string) || 1;
+    const isBonusBuy = req.query.buyBonus === 'true'; // Verifica se o usuário comprou o recurso
+    
     const betAmount = 2.00; 
+    
+    // Matemática Financeira da Compra de Bônus
+    let costOfSpin = betAmount;
+    if (isBonusBuy) {
+        costOfSpin = betAmount * 100; // Custa 100x a aposta (R$ 200)
+    }
 
-    // O Cassino gera a semente (Num jogo real, ela seria buscada no banco de dados)
     const serverSeed = ProvablyFair.generateServerSeed(); 
 
-    // --- EXECUÇÃO DO JOGO BASE ---
-    const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, baseNonce, betAmount, false);
+    // O jogo base roda sabendo se é uma compra ou não
+    const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, baseNonce, betAmount, false, isBonusBuy);
     
-    // Verifica se ativou o Bônus
     const ativouBônus = jogoBase.scattersNaTela >= 4;
     
     let totalHashesUtilizados = jogoBase.hashesGerados;
     let premioFinalTotal = jogoBase.premioRodada;
     let dadosDoBonus = null;
 
-    // --- MÁGICA: EXECUÇÃO DO BÔNUS (TRANSAÇÃO ATÔMICA) ---
     if (ativouBônus) {
         dadosDoBonus = {
             quantidadeGiros: 10,
             premioTotalBonus: 0,
-            giros: [] as any[] // Array para tipar no typescript
+            giros: [] as any[] 
         };
 
-        // Roda os 10 giros grátis instantaneamente no servidor!
         for (let i = 1; i <= 10; i++) {
-            // O Nonce aumenta a cada giro grátis para garantir hashes únicos!
             const bonusNonce = baseNonce + i; 
-            
-            const giroBonus = RoundProcessor.processSingleSpin(serverSeed, clientSeed, bonusNonce, betAmount, true);
+            const giroBonus = RoundProcessor.processSingleSpin(serverSeed, clientSeed, bonusNonce, betAmount, true, false);
 
             dadosDoBonus.giros.push({
                 giro: i,
@@ -53,23 +55,26 @@ app.get('/api/test-crypto', (req, res) => {
             dadosDoBonus.premioTotalBonus += giroBonus.premioRodada;
             totalHashesUtilizados += giroBonus.hashesGerados;
         }
-
-        // Soma o prêmio do jogo base com o que ganhou no bônus
-        premioFinalTotal += dadosDoBonus.premioTotalBonus;
+        
+        // Fix de casas decimais para o total
+        dadosDoBonus.premioTotalBonus = Number(dadosDoBonus.premioTotalBonus.toFixed(2));
+        premioFinalTotal = Number((premioFinalTotal + dadosDoBonus.premioTotalBonus).toFixed(2));
     }
 
-    // --- ENTREGA O "ROTEIRO DO FILME" PARA O FRONTEND ---
     res.json({
-        mensagem: ativouBônus ? "BÔNUS ATIVADO! 10 Giros Grátis Calculados." : "Rodada Base concluída.",
+        mensagem: ativouBônus ? "BÔNUS ATIVADO!" : "Rodada Base concluída.",
         auditoria: {
             serverSeed,
             clientSeed,
             nonceInicial: baseNonce,
-            totalHashesGerados: totalHashesUtilizados
+            totalHashesGerados: totalHashesUtilizados,
+            isBonusBuy: isBonusBuy
         },
         resumoFinanceiro: {
-            aposta: betAmount,
-            premioTotalDaSessao: premioFinalTotal
+            valorApostado: costOfSpin,
+            valorBaseMoeda: betAmount,
+            premioTotalDaSessao: premioFinalTotal,
+            lucroSessao: Number((premioFinalTotal - costOfSpin).toFixed(2)) // Mostra se a pessoa saiu no lucro ou prejuízo
         },
         roteiroDoJogo: {
             jogoBase: {
@@ -78,6 +83,46 @@ app.get('/api/test-crypto', (req, res) => {
                 premioRodada: jogoBase.premioRodada,
                 historicoRodada: jogoBase.historico
             },
+            jogoBonus: dadosDoBonus
+        }
+    });
+});
+
+// ROTA 2: CALCULADORA PROVABLY FAIR (AUDITORIA)
+// O jogador manda as seeds reveladas, e o servidor recalcula o jogo aberto.
+app.post('/api/verify', (req, res) => {
+    const { serverSeed, clientSeed, nonceInicial, isBonusBuy } = req.body;
+
+    if (!serverSeed || !clientSeed || !nonceInicial) {
+         res.status(400).json({ erro: "Sementes incompletas para verificação." });
+         return;
+    }
+
+    const betAmount = 2.00; // Hardcoded para simplificar a auditoria
+    
+    // Roda o simulador exatamente igual a rota oficial
+    const jogoBase = RoundProcessor.processSingleSpin(serverSeed, clientSeed, nonceInicial, betAmount, false, isBonusBuy);
+    const ativouBônus = jogoBase.scattersNaTela >= 4;
+    
+    let premioFinalTotal = jogoBase.premioRodada;
+    let dadosDoBonus = null;
+
+    if (ativouBônus) {
+        dadosDoBonus = { giros: [] as any[], premioTotalBonus: 0 };
+        for (let i = 1; i <= 10; i++) {
+            const giro = RoundProcessor.processSingleSpin(serverSeed, clientSeed, nonceInicial + i, betAmount, true, false);
+            dadosDoBonus.giros.push(giro);
+            dadosDoBonus.premioTotalBonus += giro.premioRodada;
+        }
+        premioFinalTotal += dadosDoBonus.premioTotalBonus;
+    }
+
+    res.json({
+        mensagem: "Auditoria concluída. Os resultados matemáticos são:",
+        verificadoComSucesso: true,
+        premioCalculado: Number(premioFinalTotal.toFixed(2)),
+        detalhes: {
+            jogoBase,
             jogoBonus: dadosDoBonus
         }
     });
