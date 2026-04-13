@@ -1,49 +1,62 @@
 export class GameMath {
-    // Tabela de Símbolos e Pesos (Probabilidades)
-    // Quanto maior o peso, mais fácil de cair.
-    static symbolTable = [
-        { id: 1, name: 'pocao_azul', weight: 400 },     // Muito Comum
-        { id: 2, name: 'pocao_verde', weight: 300 },    // Comum
-        { id: 3, name: 'pocao_vermelha', weight: 150 }, // Incomum
-        { id: 4, name: 'pedra_filosofal', weight: 100 },// Raro
-        { id: 5, name: 'scatter_grimorio', weight: 50 } // Muito Raro (Bônus)
+    static commonSymbols = [
+        // LOW PAYS (Cristais Brutos - Alta Frequência)
+        { id: 1, name: 'cristal_cinza', weight: 500 },
+        { id: 2, name: 'cristal_verde', weight: 400 },
+        { id: 3, name: 'cristal_azul', weight: 350 },
+        { id: 4, name: 'cristal_rosa', weight: 300 },
+        { id: 5, name: 'cristal_amarelo', weight: 250 },
+
+        // HIGH PAYS (Poções Refinadas - Baixa Frequência)
+        { id: 6, name: 'pocao_verde', weight: 150 },
+        { id: 7, name: 'pocao_azul', weight: 100 },
+        { id: 8, name: 'pocao_vermelha', weight: 70 },
+        { id: 9, name: 'pocao_dourada', weight: 40 }, // O símbolo mais valioso do jogo base
     ];
 
-    /**
-     * Converte o Hash Hexadecimal em um Array de 30 Símbolos
-     */
-    static generateGridFromHash(hash: string): any[] {
+    // 1. Tabela do Jogo Base
+    static baseTable = [
+        ...this.commonSymbols,
+        { id: 10, name: 'scatter_grimorio', weight: 25 } // Deixei mais difícil para balancear
+    ];
+
+    // 2. Tabela do Jogo Bônus (Com o Multiplicador)
+    static bonusTable = [
+        ...this.commonSymbols,
+        { id: 10, name: 'scatter_grimorio', weight: 20 },
+        { id: 11, name: 'pedra_filosofal', weight: 60 } // O multiplicador!
+    ];
+
+    // Valores possíveis para o multiplicador da Pedra Filosofal
+    static multiplierValues = [2, 3, 4, 5, 8, 10, 15, 25, 50, 100];
+
+    static generateGridFromHash(hash: string, isBonusMode: boolean = false): any[] {
         const grid = [];
-        
-        // Calcula o peso total da nossa tabela (400+300+150+100+50 = 1000)
-        const totalWeight = this.symbolTable.reduce((acc, symbol) => acc + symbol.weight, 0);
+        const activeTable = isBonusMode ? this.bonusTable : this.baseTable;
+        const totalWeight = activeTable.reduce((acc, symbol) => acc + symbol.weight, 0);
 
-        // Precisamos de 30 símbolos para um grid 6x5
         for (let i = 0; i < 30; i++) {
-            // Pega 2 caracteres do hash por vez (1 Byte)
-            // Loop 0: caracteres 0 e 1 | Loop 1: caracteres 2 e 3...
             const hexByte = hash.substring(i * 2, (i * 2) + 2);
-            
-            // Converte o Hexadecimal ("75") para Decimal (117)
             const decimalValue = parseInt(hexByte, 16);
-            
-            // Transforma o número de 0-255 em um Float de 0.0 a 1.0
             const floatValue = decimalValue / 256;
-
-            // Multiplica o float pelo peso total (ex: 0.45 * 1000 = 450)
             const randomWeight = floatValue * totalWeight;
 
-            // Encontra qual símbolo corresponde a esse peso
             let currentWeight = 0;
-            for (const symbol of this.symbolTable) {
+            for (const symbol of activeTable) {
                 currentWeight += symbol.weight;
                 if (randomWeight < currentWeight) {
-                    grid.push(symbol);
+                    let item: any = { ...symbol }; 
+                    
+                    if (item.name === 'pedra_filosofal') {
+                        const multiIndex = decimalValue % this.multiplierValues.length;
+                        item.valor_multiplicador = this.multiplierValues[multiIndex];
+                    }
+
+                    grid.push(item);
                     break;
                 }
             }
         }
-
         return grid;
     }
 }
