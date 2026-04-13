@@ -28,13 +28,44 @@ export class GameMath {
 
     static multiplierValues = [2, 3, 4, 5, 8, 10, 15, 25, 50, 100];
 
-    static generateGridFromHash(hash: string, isBonusMode: boolean = false): any[] {
-        const grid = [];
+/**
+     * NOVO: Adicionado o parâmetro isBonusBuy.
+     */
+    static generateGridFromHash(hash: string, isBonusMode: boolean = false, isBonusBuy: boolean = false): any[] {
+        const grid = new Array(30).fill(null);
         const activeTable = isBonusMode ? this.bonusTable : this.baseTable;
         const totalWeight = activeTable.reduce((acc, symbol) => acc + symbol.weight, 0);
 
+        let hashIndex = 0; // Usado para saber qual byte do hash estamos lendo
+        let forcedScatterPositions: number[] = [];
+
+        // SE FOR COMPRA DE BÔNUS: Sorteamos 4 posições únicas baseadas no Hash!
+        if (isBonusBuy) {
+            for (let i = 0; i < 4; i++) {
+                let hexByte = hash.substring(hashIndex * 2, (hashIndex * 2) + 2);
+                let pos = parseInt(hexByte, 16) % 30; // Garante um número de 0 a 29
+                hashIndex++;
+                
+                // Se a posição já foi sorteada, pula para a próxima casa livre
+                while (forcedScatterPositions.includes(pos)) {
+                    pos = (pos + 1) % 30;
+                }
+                forcedScatterPositions.push(pos);
+            }
+        }
+
+        // Preenche o grid
         for (let i = 0; i < 30; i++) {
-            const hexByte = hash.substring(i * 2, (i * 2) + 2);
+            // Se essa posição foi sorteada para ser o scatter da compra de bônus, injeta ele!
+            if (forcedScatterPositions.includes(i)) {
+                grid[i] = { id: 10, name: 'scatter_grimorio', weight: 25 };
+                continue;
+            }
+
+            // Geração Normal para os outros espaços
+            const hexByte = hash.substring(hashIndex * 2, (hashIndex * 2) + 2);
+            hashIndex++; // Avança a leitura do hash
+            
             const decimalValue = parseInt(hexByte, 16);
             const floatValue = decimalValue / 256;
             const randomWeight = floatValue * totalWeight;
@@ -50,7 +81,7 @@ export class GameMath {
                         item.valor_multiplicador = this.multiplierValues[multiIndex];
                     }
 
-                    grid.push(item);
+                    grid[i] = item;
                     break;
                 }
             }
