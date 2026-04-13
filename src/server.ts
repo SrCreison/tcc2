@@ -8,15 +8,13 @@ app.use(express.json());
 
 // Rota de teste para ver a mágica acontecendo
 app.get('/api/test-crypto', (req, res) => {
-    // 1. O Servidor gera sua semente secreta (CSPRNG)
     const serverSeed = ProvablyFair.generateServerSeed();
-    
-    // 2. O Jogador (ou navegador) fornece a dele e o número da aposta
-    const clientSeed = "MeuTCC_Alquimia_2024";
-    const nonce = 1;
-
-    // 3. A combinação dos três gera o destino do jogo
-    const gameHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce);
+    // Captura a Client Seed enviada pela URL (Query Parameter).
+    // Se o usuário não mandar nada, usamos "semente_padrao" para não dar erro.
+    const clientSeed = (req.query.cSeed as string) || "semente_padrao"; 
+    // O Nonce (número da aposta) também costuma vir do banco de dados, 
+    // mas por enquanto vamos simular pegando da URL também!
+    const nonce = parseInt(req.query.aposta as string) || 1;
 
     res.json({
         mensagem: "Motor Criptográfico Online!",
