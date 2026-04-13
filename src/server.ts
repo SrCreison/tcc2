@@ -14,31 +14,55 @@ app.get('/api/test-crypto', (req, res) => {
     const nonce = parseInt(req.query.aposta as string) || 1;
     const isBonusMode = req.query.bonus === 'true';
 
-    // 1. Gera o Hash
-    const gameHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce);
+    let cursor = 0; // Começamos na cascata 0
+    let isCascading = true;
+    let roundHistory = []; // O "filme" da rodada inteira
 
-    // 2. Gera os primeiros 30 símbolos
-    const gridGerado = GameMath.generateGridFromHash(gameHash, isBonusMode);
+    // 1. Gera o Grid Inicial
+    let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
+    let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode);
 
-    // 3. Avaliação do grid com os resultados gerados
-    const avaliacao = GameEngine.evaluateGrid(gridGerado);
+    // 2. O Loop da Cascata (Roda em milissegundos no servidor)
+    while (isCascading) {
+        // O juiz avalia a tela atual
+        const avaliacao = GameEngine.evaluateGrid(currentGrid);
+
+        // Guardamos essa "cena" no histórico para o Frontend exibir
+        roundHistory.push({
+            cascata: cursor,
+            hashUtilizado: currentHash,
+            grid: currentGrid,
+            resultado: avaliacao
+        });
+
+        if (avaliacao.teveVitoria) {
+            // Se ganhou, precisamos de novos símbolos!
+            cursor++; 
+            
+            // Geramos um NOVO hash usando o novo cursor
+            currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
+            
+            // Geramos um pool de 30 novos símbolos para usar como "estepe"
+            let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode);
+            
+            // A gravidade atua: remove os velhos e injeta os novos
+            currentGrid = GameEngine.applyCascade(currentGrid, avaliacao.posicoesParaExplodir, poolDeNovosSimbolos);
+        } else {
+            // Se não formou 8 iguais, a rodada acabou!
+            isCascading = false; 
+        }
+    }
 
     res.json({
-        mensagem: isBonusMode ? "Grid BÔNUS Gerado!" : "Grid BASE Gerado!",
+        mensagem: `Rodada concluída com ${cursor} cascatas!`,
         auditoria: {
             serverSeed,
             clientSeed,
             nonce,
-            hashFinal: gameHash,
-            modoBonusAtivo: isBonusMode
+            modoBonusAtivo: isBonusMode,
+            totalHashesGerados: cursor + 1
         },
-        estatisticas: {
-            scatters: gridGerado.filter(s => s.name === 'scatter_grimorio').length,
-            multiplicadores: gridGerado.filter(s => s.name === 'pedra_filosofal').length,
-        },
-        // Mostramos o resultado da avaliação aqui:
-        resultadoRodada: avaliacao,
-        grid: gridGerado
+        historicoRodada: roundHistory // O Frontend vai ler isso passo a passo!
     });
 });
 
