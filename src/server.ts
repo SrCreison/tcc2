@@ -14,19 +14,17 @@ app.get('/api/test-crypto', (req, res) => {
     const nonce = parseInt(req.query.aposta as string) || 1;
     const isBonusMode = req.query.bonus === 'true';
     
-    // NOVO: Valor da aposta em R$ (vamos assumir R$ 2.00 para este teste)
     const betAmount = 2.00; 
 
     let cursor = 0; 
     let isCascading = true;
     let roundHistory = []; 
-    let totalWinAmount = 0; // Rastreia o prêmio total da rodada
+    let totalWinAmount = 0; 
 
     let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
     let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode);
 
     while (isCascading) {
-        // Agora passamos o valor da aposta para a Engine!
         const avaliacao = GameEngine.evaluateGrid(currentGrid, betAmount);
 
         roundHistory.push({
@@ -37,9 +35,7 @@ app.get('/api/test-crypto', (req, res) => {
         });
 
         if (avaliacao.teveVitoria) {
-            // Soma o prêmio da cascata ao total do jogador
             totalWinAmount += avaliacao.premioCascata; 
-
             cursor++; 
             currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
             let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode);
@@ -49,23 +45,35 @@ app.get('/api/test-crypto', (req, res) => {
         }
     }
 
-    // A CASCATA ACABOU. HORA DE APLICAR OS MULTIPLICADORES!
-    let totalMultiplier = 0;
+    // --- FIM DA CASCATA: ANÁLISE FINAL DA TELA ---
     
-    // Se o jogador ganhou algum prêmio (não adianta multiplicar zero)...
-    if (totalWinAmount > 0 && isBonusMode) {
-        // Varre o último grid gerado (onde a cascata parou) para achar as Pedras Filosofais
-        currentGrid.forEach(symbol => {
-            if (symbol && symbol.name === 'pedra_filosofal') {
-                totalMultiplier += symbol.valor_multiplicador;
-            }
-        });
+    let totalMultiplier = 0;
+    let totalScatters = 0;
 
-        // Se encontrou alguma pedra, multiplica o prêmio!
-        if (totalMultiplier > 0) {
-            totalWinAmount = totalWinAmount * totalMultiplier;
+    // Varre a tela final (onde as peças pararam de cair)
+    currentGrid.forEach(symbol => {
+        if (!symbol) return;
+
+        // Conta as Pedras Filosofais (Só funciona se isBonusMode for true)
+        if (isBonusMode && symbol.name === 'pedra_filosofal') {
+            totalMultiplier += symbol.valor_multiplicador;
         }
+
+        // Conta os Scatters na tela
+        if (symbol.name === 'scatter_grimorio') {
+            totalScatters++;
+        }
+    });
+
+    // Aplica o multiplicador se houver ganho no modo bônus
+    if (totalWinAmount > 0 && totalMultiplier > 0) {
+        totalWinAmount = totalWinAmount * totalMultiplier;
     }
+
+    // NOVO: Verifica se ativou o bônus! (4 ou mais Scatters)
+    // Se o jogador JÁ ESTIVER no bônus, 3 scatters costumam dar "+5 Giros" (Retrigger). 
+    // Vamos focar no acionamento inicial por enquanto.
+    const ativouGirosGratis = !isBonusMode && totalScatters >= 4;
 
     res.json({
         mensagem: `Rodada concluída!`,
@@ -75,6 +83,11 @@ app.get('/api/test-crypto', (req, res) => {
             nonce,
             modoBonusAtivo: isBonusMode,
             totalHashesGerados: cursor + 1
+        },
+        // NOVO BLOCO PARA O FRONTEND
+        recursosEspeciais: {
+            scattersNaTela: totalScatters,
+            ativouGirosGratis: ativouGirosGratis
         },
         resumoFinanceiro: {
             aposta: betAmount,
