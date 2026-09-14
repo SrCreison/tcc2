@@ -1,14 +1,27 @@
 import { GameMath } from './gameMath';
+import { COLUMNS, MIN_WIN_COUNT, MULTIPLIER_SYMBOL_NAME, ROWS, SCATTER_SYMBOL_NAME } from './config';
+import type { Grid, GridEvaluation, WinningCombination } from './types';
 
 export class GameEngine {
-    
-    // NOVO: A função agora recebe o valor da aposta
-    static evaluateGrid(grid: any[], betAmount: number) {
-        const symbolCounts: { [key: string]: number } = {};
-        const symbolPositions: { [key: string]: number[] } = {};
+    /**
+     * Avalia o grid atual: conta ocorrências de cada símbolo (ignorando
+     * scatter e multiplicador, que não formam combinação) e calcula o
+     * prêmio de qualquer símbolo com MIN_WIN_COUNT ou mais ocorrências.
+     *
+     * Efeito colateral intencional: os símbolos vencedores são marcados
+     * com `venceu = true` diretamente no array `grid` recebido. Isso
+     * permite que o histórico salvo (e o front-end) saibam exatamente
+     * quais posições brilharam/explodiram nesta cascata, sem precisar
+     * duplicar essa informação em outro lugar — antes, o front já lia
+     * `simbolo.venceu` para destacar a vitória, mas o back nunca setava
+     * esse campo, então a animação de destaque nunca aparecia.
+     */
+    static evaluateGrid(grid: Grid, betAmount: number): GridEvaluation {
+        const symbolCounts: Record<string, number> = {};
+        const symbolPositions: Record<string, number[]> = {};
 
         grid.forEach((symbol, index) => {
-            if (symbol.name === 'scatter_grimorio' || symbol.name === 'pedra_filosofal') {
+            if (symbol.name === SCATTER_SYMBOL_NAME || symbol.name === MULTIPLIER_SYMBOL_NAME) {
                 return;
             }
 
@@ -21,24 +34,28 @@ export class GameEngine {
             symbolPositions[symbol.name].push(index);
         });
 
-        const winningCombinations = [];
+        const winningCombinations: WinningCombination[] = [];
         let destroyedIndexes: number[] = [];
-        let winAmount = 0; // Guardamos o prêmio desta cascata específica
+        let winAmount = 0;
 
         for (const [name, count] of Object.entries(symbolCounts)) {
-            if (count >= 8) {
-                // Calcula o prêmio!
+            if (count >= MIN_WIN_COUNT) {
                 const payout = GameMath.calculatePayout(name, count, betAmount);
                 winAmount += payout;
+
+                const posicoes = symbolPositions[name];
+                for (const pos of posicoes) {
+                    grid[pos] = { ...grid[pos], venceu: true };
+                }
 
                 winningCombinations.push({
                     simbolo: name,
                     quantidade: count,
-                    premio: payout, // Mostra o prêmio no log da vitória
-                    posicoes: symbolPositions[name]
+                    premio: payout,
+                    posicoes,
                 });
-                
-                destroyedIndexes = destroyedIndexes.concat(symbolPositions[name]);
+
+                destroyedIndexes = destroyedIndexes.concat(posicoes);
             }
         }
 
@@ -48,43 +65,41 @@ export class GameEngine {
             teveVitoria: winningCombinations.length > 0,
             combinacoesVencedoras: winningCombinations,
             posicoesParaExplodir: destroyedIndexes,
-            premioCascata: winAmount // Retorna o valor ganho nesta queda
+            premioCascata: Number(winAmount.toFixed(2)),
         };
     }
 
     /**
-     * Aplica a gravidade: remove os explodidos, faz os que sobraram cair, 
-     * e injeta os novos símbolos no topo.
+     * Aplica a gravidade: remove os símbolos destruídos, faz os
+     * sobreviventes de cada coluna caírem e preenche o espaço vazio no
+     * topo com símbolos novos vindos de `newSymbolsPool`.
      */
-    static applyCascade(currentGrid: any[], destroyedIndexes: number[], newSymbolsPool: any[]): any[] {
-        const COLUMNS = 6;
-        const ROWS = 5;
-        const nextGrid = new Array(30).fill(null);
-        let poolIndex = 0; // Quantos símbolos novos já usamos
+    static applyCascade(currentGrid: Grid, destroyedIndexes: number[], newSymbolsPool: Grid): Grid {
+        const nextGrid: Grid = new Array(COLUMNS * ROWS);
+        const destroyedSet = new Set(destroyedIndexes);
+        let poolIndex = 0;
 
-        // Varremos o grid coluna por coluna
         for (let col = 0; col < COLUMNS; col++) {
-            let columnItems = [];
+            const survivors = [];
 
-            // 1. Coleta os sobreviventes dessa coluna (de baixo para cima)
+            // Coleta os sobreviventes da coluna, de baixo para cima.
             for (let row = ROWS - 1; row >= 0; row--) {
-                let index = row * COLUMNS + col;
-                if (!destroyedIndexes.includes(index)) {
-                    columnItems.push(currentGrid[index]);
+                const index = row * COLUMNS + col;
+                if (!destroyedSet.has(index)) {
+                    survivors.push(currentGrid[index]);
                 }
             }
 
-            // 2. Preenche o espaço que sobrou com novos símbolos do nosso novo hash
-            while (columnItems.length < ROWS) {
-                columnItems.push(newSymbolsPool[poolIndex]);
+            // Completa o espaço aberto com símbolos novos.
+            while (survivors.length < ROWS) {
+                survivors.push(newSymbolsPool[poolIndex]);
                 poolIndex++;
             }
 
-            // 3. Devolve os símbolos para o novo grid (de baixo para cima)
+            // Devolve para o grid final, de baixo para cima.
             for (let row = ROWS - 1; row >= 0; row--) {
-                let index = row * COLUMNS + col;
-                // Como pegamos de baixo pra cima, a ordem em columnItems já está correta
-                nextGrid[index] = columnItems[(ROWS - 1) - row];
+                const index = row * COLUMNS + col;
+                nextGrid[index] = survivors[ROWS - 1 - row];
             }
         }
 

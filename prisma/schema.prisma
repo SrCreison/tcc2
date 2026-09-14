@@ -17,4 +17,6 @@ model GameRound {
   totalScatters     Int
   history           Json     
   createdAt         DateTime @default(now())
+
+  @@index([createdAt])
 }

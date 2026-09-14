@@ -1,68 +1,84 @@
 import { ProvablyFair } from './provablyFair';
 import { GameMath } from './gameMath';
 import { GameEngine } from './gameEngine';
+import { MULTIPLIER_SYMBOL_NAME, SCATTER_SYMBOL_NAME } from './config';
+import type { CascadeStep, SpinResult } from './types';
 
 export class RoundProcessor {
-    
-    // NOVO: Adicionado isBonusBuyTrigger
-    static processSingleSpin(serverSeed: string, clientSeed: string, nonce: number, betAmount: number, isBonusMode: boolean, isBonusBuyTrigger: boolean = false) {
+    /**
+     * Processa um giro (rodada base OU um giro da rodada bônus) até que
+     * nenhuma cascata gere vitória. `isBonusBuyTrigger` só se aplica ao
+     * primeiro grid do giro — as cascatas de preenchimento nunca forçam
+     * scatters, senão a compra de bônus poderia acionar bônus dentro do
+     * bônus indefinidamente.
+     */
+    static processSingleSpin(
+        serverSeed: string,
+        clientSeed: string,
+        nonce: number,
+        betAmount: number,
+        isBonusMode: boolean,
+        isBonusBuyTrigger: boolean = false,
+    ): SpinResult {
         let cursor = 0;
         let isCascading = true;
-        let roundHistory = [];
+        const roundHistory: CascadeStep[] = [];
         let winAmount = 0;
 
         let currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-        // Repassamos a flag isBonusBuyTrigger apenas para o primeiro giro base
         let currentGrid = GameMath.generateGridFromHash(currentHash, isBonusMode, isBonusBuyTrigger);
 
         while (isCascading) {
+            // evaluateGrid marca os símbolos vencedores (venceu = true)
+            // diretamente em currentGrid antes deste push, então o
+            // histórico salvo abaixo já reflete o destaque visual.
             const avaliacao = GameEngine.evaluateGrid(currentGrid, betAmount);
 
             roundHistory.push({
                 cascata: cursor,
                 hashUtilizado: currentHash,
                 grid: currentGrid,
-                resultado: avaliacao
+                resultado: avaliacao,
             });
 
             if (avaliacao.teveVitoria) {
                 winAmount += avaliacao.premioCascata;
                 cursor++;
                 currentHash = ProvablyFair.generateHash(serverSeed, clientSeed, nonce, cursor);
-                // Cascatas de preenchimento NUNCA são compras de bônus, são sempre normais
-                let poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode, false);
+                // O preenchimento de cascata nunca é compra de bônus.
+                const poolDeNovosSimbolos = GameMath.generateGridFromHash(currentHash, isBonusMode, false);
                 currentGrid = GameEngine.applyCascade(currentGrid, avaliacao.posicoesParaExplodir, poolDeNovosSimbolos);
             } else {
                 isCascading = false;
             }
         }
 
+        // Scatters e a Pedra Filosofal nunca são destruídos numa cascata
+        // (evaluateGrid os ignora de propósito), então eles se acumulam
+        // naturalmente através das cascatas. Por isso é seguro somá-los
+        // olhando só para o grid final, sem precisar percorrer o histórico.
         let totalMultiplier = 0;
         let totalScatters = 0;
 
-        currentGrid.forEach(symbol => {
-            if (!symbol) return;
-            if (isBonusMode && symbol.name === 'pedra_filosofal') {
-                totalMultiplier += symbol.valor_multiplicador;
+        for (const symbol of currentGrid) {
+            if (!symbol) continue;
+            if (isBonusMode && symbol.name === MULTIPLIER_SYMBOL_NAME && symbol.valorMultiplicador) {
+                totalMultiplier += symbol.valorMultiplicador;
             }
-            if (symbol.name === 'scatter_grimorio') {
+            if (symbol.name === SCATTER_SYMBOL_NAME) {
                 totalScatters++;
             }
-        });
-
-        // FIX: Limpeza de casas decimais!
-        if (winAmount > 0 && totalMultiplier > 0) {
-            winAmount = Number((winAmount * totalMultiplier).toFixed(2));
-        } else {
-            winAmount = Number(winAmount.toFixed(2));
         }
+
+        winAmount = totalMultiplier > 0 ? winAmount * totalMultiplier : winAmount;
+        winAmount = Number(winAmount.toFixed(2));
 
         return {
             historico: roundHistory,
             premioRodada: winAmount,
             multiplicadorAplicado: totalMultiplier,
             scattersNaTela: totalScatters,
-            hashesGerados: cursor + 1
+            hashesGerados: cursor + 1,
         };
     }
 }
