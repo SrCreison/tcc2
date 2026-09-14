@@ -15,6 +15,11 @@ model GameRound {
   payout            Float
   isBonusBuy        Boolean
   totalScatters     Int
+  /// "normal" ou "demonstracao" — necessário para /api/verify recalcular
+  /// a rodada com a MESMA tabela de pesos que foi usada originalmente.
+  profile           String   @default("normal")
   history           Json     
   createdAt         DateTime @default(now())
+
+  @@index([createdAt])
 }
